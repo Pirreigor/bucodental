@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+tensorflow
+tf-explain
+numpy
+Pillow
+matplotlib
+opencv-python
+fastapi
+uvicorn
+tensorflow
+pillow
+numpy
+python-multipart
+tf-explain
+matplotlib
+opencv-python

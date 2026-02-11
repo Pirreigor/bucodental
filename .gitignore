@@ -1,0 +1,62 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+
+# Editor/temp
+.vscode/
+.DS_Store
+
+# Model and result artifacts (managed by Git LFS)
+# backend/modelos/
+# backend/resultados/
+# *.keras
+# *.h5
+
+# Logs
+*.log
+# Python
+__pycache__/
+*.pyc
+
+# Virtualenvs
+venv/
+backend/venv/
+backend/venv_backup/
+
+# Models and results (managed by Git LFS)
+# backend/modelos/
+# backend/resultados/
+# *.keras
+# *.h5
+
+# Editor
+.vscode/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+venv/
+backend/venv/
+.venv/
+
+# Models and results (managed by Git LFS)
+# backend/modelos/
+# backend/resultados/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+
+# Logs
+*.log

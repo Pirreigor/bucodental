@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-02-11T17:48:04.391808Z",
+  "models": {
+    "CANCER_ORAL": {
+      "files": [
+        {
+          "name": "modelo.keras",
+          "path": "backend\\modelos\\CANCER_ORAL\\modelo.keras",
+          "sha256": "81bf8e3a9902f101d0d1eb81c3c285eac8821e85e7dc49987e6f21f3631c5954",
+          "size_bytes": 139818458
+        }
+      ]
+    },
+    "CARIES": {
+      "files": [
+        {
+          "name": "modelo.keras",
+          "path": "backend\\modelos\\CARIES\\modelo.keras",
+          "sha256": "a95b7c0ad9346230caa23373fb4b788b7ceac78e3ff796863a5da538f8ccf8a9",
+          "size_bytes": 139818458
+        }
+      ]
+    },
+    "PULPA_Y_TEJIDOS_PERIAPICALES": {
+      "files": [
+        {
+          "name": "modelo.keras",
+          "path": "backend\\modelos\\PULPA_Y_TEJIDOS_PERIAPICALES\\modelo.keras",
+          "sha256": "07e847a9203703c82a03b1873940b131e9f5fb960ddbd124a48e243d7ce151ee",
+          "size_bytes": 139824568
+        }
+      ]
+    }
+  }
+}
