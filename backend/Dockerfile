@@ -11,11 +11,15 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python deps
-COPY backend/requirements.txt /app/requirements.txt
+# Copy requirements (build context is ./backend when building)
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy application (includes modelos/ and frontend/ as you requested)
-COPY backend/ /app/
+COPY . /app/
+
+    # ensure entrypoint is executable
+RUN if [ -f /app/entrypoint.sh ]; then chmod +x /app/entrypoint.sh; fi
 
 # Create unprivileged user
 RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
@@ -25,7 +29,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Entrypoint will start uvicorn using $PORT
-COPY backend/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
 CMD ["/app/entrypoint.sh"]

@@ -10,8 +10,4 @@ backend/venv/
 node_modules/
 venv
 venv_backup
-modelos
-resultados
-*.keras
-*.h5
 .git
