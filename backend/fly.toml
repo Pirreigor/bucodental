@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for bucodental on 2026-02-11T19:51:22Z
+# fly.toml app configuration file generated for bucodental on 2026-02-18T14:06:23Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -7,10 +7,6 @@ app = 'bucodental'
 primary_region = 'iad'
 
 [build]
-  builder = 'paketobuildpacks/builder:base'
-
-[env]
-  PORT = '8080'
 
 [http_service]
   internal_port = 8080
