@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-tensorflow
+tensorflow-cpu
 tf-explain
 numpy
 Pillow
@@ -8,7 +8,7 @@ matplotlib
 opencv-python
 fastapi
 uvicorn
-tensorflow
+tensorflow-cpu
 pillow
 numpy
 python-multipart
