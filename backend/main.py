@@ -1,10 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-import io, json, os
+import io, json, os, uuid
 import threading
 from fastapi.responses import JSONResponse
 
@@ -103,87 +103,83 @@ def list_models():
     models = [d for d in os.listdir(MODELS_DIR) if os.path.isdir(os.path.join(MODELS_DIR, d))]
     return {"models": sorted(models)}
 
-@app.post("/predict")
-async def predict(model_key: str = Form(...), file: UploadFile = File(...)):
-    try:
-        print(f"[predict] inicio petición para modelo={model_key}")
-        contents = await file.read()
-        img = Image.open(io.BytesIO(contents))
+def _run_predict(model_key: str, file_bytes: bytes, base_url: str = "", unique_gradcam: bool = False) -> dict:
+    """Núcleo de predicción reutilizable por /predict y /api/analyze.
 
-        # Intentar obtener modelo (cacheado si ya se precargó)
-        model = get_model(model_key)
-        print(f"[predict] modelo obtenido: {model_key}")
-        x = preprocess_image(img, target_size=(224, 224))
-        x = np.asarray(x, dtype=np.float32)
-        print("[predict] entrada preprocesada, ejecutando predict()")
-        y = model.predict(x)
-        y = np.asarray(y, dtype=np.float32)
-        if isinstance(y, list):
-            y = np.array(y, dtype=np.float32)
-        y0 = y[0] if y.ndim > 1 else y
+    - base_url: si se proporciona, el gradcam_url devuelto será una URL absoluta.
+    - unique_gradcam: si True, guarda el Grad-CAM con un nombre único (UUID) para
+      evitar colisiones entre solicitudes concurrentes.
+    """
+    img = Image.open(io.BytesIO(file_bytes))
 
-        # binario (sigmoid) o multiclase (softmax)
-        if np.ndim(y0) == 0 or (hasattr(y0, "shape") and len(y0.shape) == 0) or (hasattr(y0, "__len__") and len(y0) == 1):
-            score = float(y0[0]) if hasattr(y0, "__len__") else float(y0)
-            return {"model": model_key, "type": "binary", "score": score}
+    model = get_model(model_key)
+    print(f"[predict] modelo obtenido: {model_key}")
+    x = preprocess_image(img, target_size=(224, 224))
+    x = np.asarray(x, dtype=np.float32)
+    print("[predict] entrada preprocesada, ejecutando predict()")
+    y = model.predict(x)
+    y = np.asarray(y, dtype=np.float32)
+    if isinstance(y, list):
+        y = np.array(y, dtype=np.float32)
+    y0 = y[0] if y.ndim > 1 else y
 
-        y0 = np.array(y0).astype(float)
-        idx = int(np.argmax(y0))
-        conf = float(y0[idx])
+    # binario (sigmoid) o multiclase (softmax)
+    if np.ndim(y0) == 0 or (hasattr(y0, "shape") and len(y0.shape) == 0) or (hasattr(y0, "__len__") and len(y0) == 1):
+        score = float(y0[0]) if hasattr(y0, "__len__") else float(y0)
+        return {"model": model_key, "type": "binary", "score": score, "gradcam_url": None}
 
-        labels = load_labels(model_key)
-        label = labels[idx] if labels and idx < len(labels) else f"clase_{idx}"
+    y0 = np.array(y0).astype(float)
+    idx = int(np.argmax(y0))
+    conf = float(y0[idx])
 
+    labels = load_labels(model_key)
+    label = labels[idx] if labels and idx < len(labels) else f"clase_{idx}"
 
+    # --- Grad-CAM ---
+    from tf_explain.core.grad_cam import GradCAM
+    import matplotlib.pyplot as plt
 
-        # --- Grad-CAM ---
-        from tf_explain.core.grad_cam import GradCAM
-        import matplotlib.pyplot as plt
-        # Detectar última capa convolucional
-        ultima_conv = None
-        for capa in reversed(model.layers):
-            if isinstance(capa, tf.keras.layers.Conv2D):
-                ultima_conv = capa.name
-                break
-            if isinstance(capa, tf.keras.Model):
-                for subcapa in reversed(capa.layers):
-                    if isinstance(subcapa, tf.keras.layers.Conv2D):
-                        ultima_conv = subcapa.name
-                        break
-                if ultima_conv:
+    ultima_conv = None
+    for capa in reversed(model.layers):
+        if isinstance(capa, tf.keras.layers.Conv2D):
+            ultima_conv = capa.name
+            break
+        if isinstance(capa, tf.keras.Model):
+            for subcapa in reversed(capa.layers):
+                if isinstance(subcapa, tf.keras.layers.Conv2D):
+                    ultima_conv = subcapa.name
                     break
+            if ultima_conv:
+                break
 
-        gradcam_url = None
-        if ultima_conv:
+    gradcam_url = None
+    if ultima_conv:
+        try:
+            print(f"[predict] generando Grad-CAM (layer={ultima_conv})")
+            explainer = GradCAM()
+            x_gc = np.asarray(x, dtype=np.float32)
+            if isinstance(x_gc, list):
+                x_gc = np.array(x_gc, dtype=np.float32)
+            data = (x_gc, None)
+            model_for_explain = model
             try:
-                print(f"[predict] generando Grad-CAM (layer={ultima_conv})")
-                explainer = GradCAM()
-                x_gc = np.asarray(x, dtype=np.float32)
-                if isinstance(x_gc, list):
-                    x_gc = np.array(x_gc, dtype=np.float32)
-                data = (x_gc, None)
-                # si el modelo devuelve múltiples salidas, usar la primera salida para el explain
+                outputs = getattr(model, 'outputs', None)
+                if isinstance(outputs, (list, tuple)):
+                    model_for_explain = tf.keras.Model(inputs=model.inputs, outputs=outputs[0])
+            except Exception:
                 model_for_explain = model
-                try:
-                    outputs = getattr(model, 'outputs', None)
-                    if isinstance(outputs, (list, tuple)):
-                        model_for_explain = tf.keras.Model(inputs=model.inputs, outputs=outputs[0])
-                except Exception:
-                    model_for_explain = model
-                grid = explainer.explain(data, model_for_explain, class_index=int(idx), layer_name=ultima_conv)
-                gradcam_dir = os.path.join(RESULTS_DIR, model_key)
-                os.makedirs(gradcam_dir, exist_ok=True)
-                gradcam_path = os.path.join(gradcam_dir, "gradcam.png")
-                plt.imsave(gradcam_path, grid.astype(np.uint8))
-                gradcam_url = f"/resultados/{model_key}/gradcam.png"
-                print(f"[predict] Grad-CAM guardado en: {gradcam_path}")
-            except Exception as e:
-                print(f"[predict] fallo generando Grad-CAM: {e}")
-                gradcam_url = None
-
-    except Exception as e:
-        print(f"[predict] error durante predict: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+            grid = explainer.explain(data, model_for_explain, class_index=int(idx), layer_name=ultima_conv)
+            gradcam_dir = os.path.join(RESULTS_DIR, model_key)
+            os.makedirs(gradcam_dir, exist_ok=True)
+            filename = f"gradcam_{uuid.uuid4().hex[:10]}.png" if unique_gradcam else "gradcam.png"
+            gradcam_path = os.path.join(gradcam_dir, filename)
+            plt.imsave(gradcam_path, grid.astype(np.uint8))
+            rel_url = f"/resultados/{model_key}/{filename}"
+            gradcam_url = f"{base_url.rstrip('/')}{rel_url}" if base_url else rel_url
+            print(f"[predict] Grad-CAM guardado en: {gradcam_path}")
+        except Exception as e:
+            print(f"[predict] fallo generando Grad-CAM: {e}")
+            gradcam_url = None
 
     return {
         "model": model_key,
@@ -191,8 +187,63 @@ async def predict(model_key: str = Form(...), file: UploadFile = File(...)):
         "label": label,
         "confidence": conf,
         "all_scores": y0.tolist(),
-        "gradcam_url": gradcam_url
+        "gradcam_url": gradcam_url,
     }
+
+
+# ── Endpoint original (usado por el frontend) ─────────────────────────────
+
+@app.post("/predict")
+async def predict(model_key: str = Form(...), file: UploadFile = File(...)):
+    try:
+        print(f"[predict] inicio petición para modelo={model_key}")
+        contents = await file.read()
+        result = _run_predict(model_key, contents)
+        print(f"[predict] completado: tipo={result.get('type')}")
+        return result
+    except Exception as e:
+        print(f"[predict] error durante predict: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── API pública ────────────────────────────────────────────────────────────
+
+@app.post("/api/analyze")
+async def api_analyze(request: Request, model_key: str = Form(...), file: UploadFile = File(...)):
+    """API para integración externa.
+
+    Parámetros (multipart/form-data):
+    - **model_key**: nombre del modelo, p. ej. `CARIES`, `CANCER_ORAL`,
+      `PULPA_Y_TEJIDOS_PERIAPICALES`.
+    - **file**: imagen a analizar (jpg, png, webp, etc.).
+
+    Respuesta JSON:
+    ```json
+    {
+      "model": "CARIES",
+      "type": "multiclass",
+      "label": "Caries Moderada",
+      "confidence": 0.92,
+      "all_scores": [0.03, 0.92, 0.05],
+      "gradcam_url": "https://tu-servidor/resultados/CARIES/gradcam_a1b2c3.png"
+    }
+    ```
+    El campo `gradcam_url` es una URL **absoluta** que apunta a la imagen
+    Grad-CAM generada para esta solicitud. Cada llamada genera un archivo
+    distinto para evitar colisiones entre peticiones concurrentes.
+    """
+    try:
+        print(f"[api/analyze] modelo={model_key}")
+        base_url = str(request.base_url).rstrip("/")
+        contents = await file.read()
+        result = _run_predict(model_key, contents, base_url=base_url, unique_gradcam=True)
+        print(f"[api/analyze] completado: tipo={result.get('type')}")
+        return result
+    except FileNotFoundError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+    except Exception as e:
+        print(f"[api/analyze] error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # Permitir ejecutar con: python main.py
